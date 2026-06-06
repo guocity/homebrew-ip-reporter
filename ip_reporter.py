@@ -51,6 +51,7 @@ import time
 import urllib.error
 import urllib.request
 
+__version__ = "1.0.2"
 DEFAULT_TELEMETRY_URL = "https://telemetry.lgnat.com/api/telemetry"
 DEFAULT_INTERVAL = 3600  # seconds (1 hour)
 HTTP_TIMEOUT = 10  # seconds
@@ -326,6 +327,8 @@ def main(argv=None):
         epilog="Subcommand: `ip-reporter install --token <TOKEN>` saves the token "
                "and starts the hourly service (cloudflared-style).",
     )
+    parser.add_argument("-v", "--version", action="version",
+                        version=f"ip-reporter {__version__} (python)")
     parser.add_argument("--token", help="Bearer token (overrides env/config).")
     parser.add_argument("--url", help=f"Gateway URL (default: {DEFAULT_TELEMETRY_URL}).")
     parser.add_argument("--service-id", dest="service_id",

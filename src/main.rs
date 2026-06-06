@@ -27,6 +27,7 @@ const DEFAULT_TELEMETRY_URL: &str = "https://telemetry.lgnat.com/api/telemetry";
 const DEFAULT_INTERVAL: u64 = 3600; // seconds (1 hour)
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const USER_AGENT: &str = "ip-reporter/2.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Services that echo back the caller's public IP as plain text.
 /// The Cloudflare trace endpoint is parsed specially (`ip=...`).
@@ -532,6 +533,7 @@ Options:\n\
   --print             Collect and print the payload without sending it (implies --once).\n\
   --config PATH       Explicit path to a KEY=VALUE config file.\n\
   -h, --help          Show this help.\n\
+  -v, --version       Print the version and exit.\n\
 \n\
 Subcommand: `ip-reporter install --token <TOKEN>` saves the token and starts the\n\
 hourly service (cloudflared-style)."
@@ -586,6 +588,10 @@ fn run() -> i32 {
             "--print" => dry_run = true,
             "-h" | "--help" => {
                 print_help();
+                return 0;
+            }
+            "-v" | "--version" => {
+                println!("ip-reporter {VERSION} (rust)");
                 return 0;
             }
             s => {
