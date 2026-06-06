@@ -98,7 +98,7 @@ fn default_config_paths() -> Vec<PathBuf> {
 }
 
 /// Parse an optional KEY=VALUE config file. Returns an empty map if none found.
-fn read_config_file(explicit: Option<&str>) -> BTreeMap<String, String> {
+fn read_config_file(explicit: Option<&str>) -> (BTreeMap<String, String>, Option<PathBuf>) {
     let paths: Vec<PathBuf> = match explicit {
         Some(p) => vec![PathBuf::from(p)],
         None => default_config_paths(),
@@ -118,10 +118,10 @@ fn read_config_file(explicit: Option<&str>) -> BTreeMap<String, String> {
                 }
                 log(&format!("Loaded config from {}", path.display()));
             }
-            break;
+            return (cfg, Some(path));
         }
     }
-    cfg
+    (cfg, None)
 }
 
 /// Resolve one setting: CLI flag > env var > config file > default.
@@ -237,13 +237,17 @@ fn json_field(key: &str, value: &Option<String>) -> String {
 }
 
 /// Build the `{hostname, wan_ip, lan_ip[, service_id]}` payload as a JSON string.
-fn build_payload(agent: &ureq::Agent, service_id: &Option<String>) -> String {
+fn build_payload(
+    wan_ip: &Option<String>,
+    lan_ip: &Option<String>,
+    service_id: &Option<String>,
+) -> String {
     let mut fields = vec![
         // service_id (derived from the token) is this machine's hostname, so the
         // hostname field is redundant — commented out for now.
         // json_field("hostname", &Some(get_hostname())),
-        json_field("wan_ip", &get_wan_ip(agent)),
-        json_field("lan_ip", &get_lan_ip()),
+        json_field("wan_ip", wan_ip),
+        json_field("lan_ip", lan_ip),
     ];
     if let Some(sid) = service_id {
         if !sid.is_empty() {
@@ -292,19 +296,74 @@ fn send(agent: &ureq::Agent, url: &str, token: &Option<String>, payload: &str) -
     }
 }
 
-fn report_once(
+fn check_and_report(
     agent: &ureq::Agent,
     url: &str,
     token: &Option<String>,
     service_id: &Option<String>,
+    write_path: &Path,
+    last_wan_ip: &mut Option<String>,
+    last_lan_ip: &mut Option<String>,
     dry_run: bool,
 ) -> bool {
-    let payload = build_payload(agent, service_id);
-    log(&format!("Payload: {payload}"));
+    let wan_ip = get_wan_ip(agent);
+    let lan_ip = get_lan_ip();
+
     if dry_run {
+        let payload = build_payload(&wan_ip, &lan_ip, service_id);
+        log(&format!("Payload: {payload}"));
         return true;
     }
-    send(agent, url, token, &payload)
+
+    let ip_changed = match (&wan_ip, last_wan_ip.as_ref()) {
+        (Some(curr), Some(last)) => curr != last,
+        (Some(_), None) => true,
+        _ => false,
+    } || match (&lan_ip, last_lan_ip.as_ref()) {
+        (Some(curr), Some(last)) => curr != last,
+        (Some(_), None) => true,
+        _ => false,
+    };
+
+    if !ip_changed {
+        log(&format!(
+            "IPs unchanged (WAN: {}, LAN: {}). Skipping send.",
+            wan_ip.as_deref().unwrap_or("unknown"),
+            lan_ip.as_deref().unwrap_or("unknown")
+        ));
+        return true;
+    }
+
+    let payload = build_payload(&wan_ip, &lan_ip, service_id);
+    log(&format!("Payload: {payload}"));
+
+    if send(agent, url, token, &payload) {
+        if wan_ip.is_some() {
+            *last_wan_ip = wan_ip.clone();
+        }
+        if lan_ip.is_some() {
+            *last_lan_ip = lan_ip.clone();
+        }
+
+        let mut values = Vec::new();
+        if let Some(w) = last_wan_ip {
+            values.push(("LAST_WAN_IP".to_string(), w.clone()));
+        }
+        if let Some(l) = last_lan_ip {
+            values.push(("LAST_LAN_IP".to_string(), l.clone()));
+        }
+        if !values.is_empty() {
+            if let Err(e) = write_config_values(write_path, &values) {
+                log(&format!(
+                    "WARNING: could not save updated IPs to config {}: {e}",
+                    write_path.display()
+                ));
+            }
+        }
+        true
+    } else {
+        false
+    }
 }
 
 fn build_agent() -> ureq::Agent {
@@ -606,7 +665,7 @@ fn run() -> i32 {
         i += 1;
     }
 
-    let cfg = read_config_file(cli_config.as_deref());
+    let (cfg, config_path) = read_config_file(cli_config.as_deref());
 
     let token = resolve(cli_token.as_deref(), "TELEMETRY_TOKEN", &cfg, "TELEMETRY_TOKEN", None);
     let url = resolve(
@@ -628,11 +687,24 @@ fn run() -> i32 {
     .and_then(|s| s.parse().ok())
     .unwrap_or(DEFAULT_INTERVAL);
 
+    let mut last_wan_ip = cfg.get("LAST_WAN_IP").cloned();
+    let mut last_lan_ip = cfg.get("LAST_LAN_IP").cloned();
+    let write_path = config_path.unwrap_or_else(|| resolve_writable_config(cli_config.as_deref()));
+
     let agent = build_agent();
 
     // A single shot: --once or a dry run.
     if once || dry_run {
-        return if report_once(&agent, &url, &token, &service_id, dry_run) {
+        return if check_and_report(
+            &agent,
+            &url,
+            &token,
+            &service_id,
+            &write_path,
+            &mut last_wan_ip,
+            &mut last_lan_ip,
+            dry_run,
+        ) {
             0
         } else {
             1
@@ -644,7 +716,16 @@ fn run() -> i32 {
         "ip-reporter started: reporting every {interval}s to {url}"
     ));
     loop {
-        report_once(&agent, &url, &token, &service_id, false);
+        check_and_report(
+            &agent,
+            &url,
+            &token,
+            &service_id,
+            &write_path,
+            &mut last_wan_ip,
+            &mut last_lan_ip,
+            false,
+        );
         std::thread::sleep(Duration::from_secs(interval.max(1)));
     }
 }

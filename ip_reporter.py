@@ -82,7 +82,7 @@ def log(msg):
 
 
 def read_config_file(explicit_path=None):
-    """Parse an optional KEY=VALUE config file. Returns {} if none is found."""
+    """Parse an optional KEY=VALUE config file. Returns (cfg, loaded_path)."""
     paths = (explicit_path,) if explicit_path else DEFAULT_CONFIG_PATHS
     cfg = {}
     for path in paths:
@@ -95,8 +95,8 @@ def read_config_file(explicit_path=None):
                     key, _, value = line.partition("=")
                     cfg[key.strip()] = value.strip().strip('"').strip("'")
             log(f"Loaded config from {path}")
-            break
-    return cfg
+            return cfg, path
+    return cfg, None
 
 
 def resolve(cli_value, env_key, cfg, cfg_key, default=None):
@@ -157,13 +157,13 @@ def get_wan_ip():
     return None
 
 
-def build_payload(service_id=None):
+def build_payload(wan_ip, lan_ip, service_id=None):
     payload = {
         # service_id (derived from the token) is this machine's hostname, so the
         # hostname field is redundant — commented out for now.
         # "hostname": get_hostname(),
-        "wan_ip": get_wan_ip(),
-        "lan_ip": get_lan_ip(),
+        "wan_ip": wan_ip,
+        "lan_ip": lan_ip,
     }
     if service_id:
         payload["service_id"] = service_id
@@ -201,12 +201,54 @@ def send(url, token, payload):
     return False
 
 
-def report_once(url, token, service_id, dry_run=False):
-    payload = build_payload(service_id)
-    log(f"Payload: {json.dumps(payload)}")
+def check_and_report(url, token, service_id, write_path, last_ips, dry_run=False):
+    wan_ip = get_wan_ip()
+    lan_ip = get_lan_ip()
+
     if dry_run:
+        payload = build_payload(wan_ip, lan_ip, service_id)
+        log(f"Payload: {json.dumps(payload)}")
         return True
-    return send(url, token, payload)
+
+    last_wan = last_ips.get("last_wan_ip")
+    last_lan = last_ips.get("last_lan_ip")
+
+    # Compare current resolved IP with cached IP. If resolved IP is None (glitch), we don't count it as a change.
+    ip_changed = False
+    if wan_ip is not None:
+        if last_wan is None or wan_ip != last_wan:
+            ip_changed = True
+    if lan_ip is not None:
+        if last_lan is None or lan_ip != last_lan:
+            ip_changed = True
+
+    if not ip_changed:
+        log(f"IPs unchanged (WAN: {wan_ip or 'unknown'}, LAN: {lan_ip or 'unknown'}). Skipping send.")
+        return True
+
+    payload = build_payload(wan_ip, lan_ip, service_id)
+    log(f"Payload: {json.dumps(payload)}")
+
+    if send(url, token, payload):
+        if wan_ip is not None:
+            last_ips["last_wan_ip"] = wan_ip
+        if lan_ip is not None:
+            last_ips["last_lan_ip"] = lan_ip
+
+        values = {}
+        if last_ips.get("last_wan_ip"):
+            values["LAST_WAN_IP"] = last_ips["last_wan_ip"]
+        if last_ips.get("last_lan_ip"):
+            values["LAST_LAN_IP"] = last_ips["last_lan_ip"]
+
+        if values:
+            try:
+                write_config_values(write_path, values)
+            except Exception as exc:
+                log(f"WARNING: could not save updated IPs to config {write_path}: {exc}")
+        return True
+    else:
+        return False
 
 
 # --- `install` subcommand: bake the token into config + (re)start the service ---
@@ -345,7 +387,7 @@ def main(argv=None):
     parser.add_argument("--config", help="Explicit path to a KEY=VALUE config file.")
     args = parser.parse_args(argv)
 
-    cfg = read_config_file(args.config)
+    cfg, config_path = read_config_file(args.config)
 
     token = resolve(args.token, "TELEMETRY_TOKEN", cfg, "TELEMETRY_TOKEN")
     url = resolve(args.url, "TELEMETRY_URL", cfg, "TELEMETRY_URL", DEFAULT_TELEMETRY_URL)
@@ -353,14 +395,20 @@ def main(argv=None):
     interval = int(resolve(
         args.interval, "REPORT_INTERVAL", cfg, "REPORT_INTERVAL", DEFAULT_INTERVAL))
 
+    last_ips = {
+        "last_wan_ip": cfg.get("LAST_WAN_IP"),
+        "last_lan_ip": cfg.get("LAST_LAN_IP"),
+    }
+    write_path = config_path or resolve_writable_config(args.config)
+
     # A single shot: --once or a dry run.
     if args.once or args.dry_run:
-        return 0 if report_once(url, token, service_id, dry_run=args.dry_run) else 1
+        return 0 if check_and_report(url, token, service_id, write_path, last_ips, dry_run=args.dry_run) else 1
 
     # Daemon mode (default): report immediately, then every `interval` seconds.
     log(f"ip-reporter started: reporting every {interval}s to {url}")
     while True:
-        report_once(url, token, service_id)
+        check_and_report(url, token, service_id, write_path, last_ips)
         time.sleep(max(1, interval))
 
 
