@@ -154,6 +154,8 @@ fn resolve(
 // Data collection
 // ---------------------------------------------------------------------------
 
+// Kept for when the hostname field is re-enabled in build_payload().
+#[allow(dead_code)]
 fn get_hostname() -> String {
     gethostname::gethostname().to_string_lossy().into_owned()
 }
@@ -237,7 +239,9 @@ fn json_field(key: &str, value: &Option<String>) -> String {
 /// Build the `{hostname, wan_ip, lan_ip[, service_id]}` payload as a JSON string.
 fn build_payload(agent: &ureq::Agent, service_id: &Option<String>) -> String {
     let mut fields = vec![
-        json_field("hostname", &Some(get_hostname())),
+        // service_id (derived from the token) is this machine's hostname, so the
+        // hostname field is redundant — commented out for now.
+        // json_field("hostname", &Some(get_hostname())),
         json_field("wan_ip", &get_wan_ip(agent)),
         json_field("lan_ip", &get_lan_ip()),
     ];

@@ -51,7 +51,7 @@ import time
 import urllib.error
 import urllib.request
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 DEFAULT_TELEMETRY_URL = "https://telemetry.lgnat.com/api/telemetry"
 DEFAULT_INTERVAL = 3600  # seconds (1 hour)
 HTTP_TIMEOUT = 10  # seconds
@@ -159,7 +159,9 @@ def get_wan_ip():
 
 def build_payload(service_id=None):
     payload = {
-        "hostname": get_hostname(),
+        # service_id (derived from the token) is this machine's hostname, so the
+        # hostname field is redundant — commented out for now.
+        # "hostname": get_hostname(),
         "wan_ip": get_wan_ip(),
         "lan_ip": get_lan_ip(),
     }

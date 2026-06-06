@@ -1,6 +1,6 @@
 [package]
 name = "ip-reporter"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "Report a machine's WAN and LAN IP to the telemetry gateway on a schedule"
 license = "MIT"
