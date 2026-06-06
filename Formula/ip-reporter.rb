@@ -1,7 +1,7 @@
 class IpReporter < Formula
   desc "Report a machine's WAN and LAN IP to the telemetry gateway on a schedule"
   homepage "https://github.com/guocity/homebrew-ip-reporter"
-  url "https://github.com/guocity/homebrew-ip-reporter.git", tag: "v1.0.0", revision: "21f729abdd7c4709c9398c8820ca274eb6585f2f"
+  url "https://github.com/guocity/homebrew-ip-reporter.git", tag: "v1.0.1", revision: "__REVISION__"
   license "MIT"
   head "https://github.com/guocity/homebrew-ip-reporter.git", branch: "main"
 
@@ -32,21 +32,20 @@ class IpReporter < Formula
 
   def caveats
     <<~EOS
-      Before starting the service, set this machine's telemetry token:
+      Set the token and start the hourly service in one step (cloudflared-style):
 
-        1) On the telemetry server host, mint a token bound to this hostname:
-             node server/manage-tokens.js generate "$(hostname)" telemetry
-        2) Put it in the config file (also set REPORT_INTERVAL if you want a
-           cadence other than 3600s):
-             #{etc}/ip-reporter/config.env
-        3) Start (and enable at login) the hourly reporter:
-             brew services start ip-reporter
+        ip-reporter install --token <TOKEN>
 
-      Or skip the config entirely and run it directly:
-             ip-reporter --token <TOKEN> --interval 3600
-             ip-reporter --print          # dry run, shows the payload
+      Mint a token on the telemetry server host, bound to this hostname:
+        node server/manage-tokens.js generate "$(hostname)" telemetry
 
-      Logs: #{var}/log/ip-reporter.log
+      Other cadence?  ip-reporter install --token <TOKEN> --interval 1800
+      Already configured?  brew services start ip-reporter
+      Run directly (no service):  ip-reporter --token <TOKEN>
+      Dry run:  ip-reporter --print
+
+      Config: #{etc}/ip-reporter/config.env
+      Logs:   #{var}/log/ip-reporter.log
     EOS
   end
 

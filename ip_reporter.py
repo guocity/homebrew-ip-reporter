@@ -42,8 +42,10 @@ Token generation (on the server host), bound to this machine's hostname:
 import argparse
 import json
 import os
+import shutil
 import socket
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -204,9 +206,125 @@ def report_once(url, token, service_id, dry_run=False):
     return send(url, token, payload)
 
 
+# --- `install` subcommand: bake the token into config + (re)start the service ---
+# This mirrors `cloudflared service install <TOKEN>`: one command sets the token
+# and brings the background service up.
+
+def resolve_writable_config(explicit=None):
+    """Pick the config file the service reads, creating its path if needed.
+
+    Order: --config > IP_REPORTER_CONFIG > an existing standard file (incl. the
+    Homebrew etc that `brew services` reads) > the Homebrew etc path if brew is
+    present > ~/.config/ip-reporter/config.env.
+    """
+    if explicit:
+        return explicit
+    if os.environ.get("IP_REPORTER_CONFIG"):
+        return os.environ["IP_REPORTER_CONFIG"]
+
+    candidates = (
+        "/opt/homebrew/etc/ip-reporter/config.env",
+        "/usr/local/etc/ip-reporter/config.env",
+        os.path.expanduser("~/.config/ip-reporter/config.env"),
+    )
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+
+    try:
+        prefix = subprocess.check_output(
+            ["brew", "--prefix"], text=True, stderr=subprocess.DEVNULL).strip()
+        if prefix:
+            return os.path.join(prefix, "etc", "ip-reporter", "config.env")
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    return os.path.expanduser("~/.config/ip-reporter/config.env")
+
+
+def write_config_values(path, values):
+    """Upsert KEY=VALUE pairs into a config file, preserving other lines."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    lines = []
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+
+    remaining = dict(values)
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        key = stripped.split("=", 1)[0].strip() if "=" in stripped else None
+        if key in remaining and not stripped.startswith("#"):
+            out.append(f"{key}={remaining.pop(key)}")
+        else:
+            out.append(line)
+    for key, value in remaining.items():
+        out.append(f"{key}={value}")
+
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out) + "\n")
+    os.chmod(path, 0o600)
+
+
+def do_install(argv):
+    parser = argparse.ArgumentParser(
+        prog="ip-reporter install",
+        description="Save the token into the service config and (re)start the hourly "
+                    "service — like `cloudflared service install <TOKEN>`.",
+    )
+    parser.add_argument("token_pos", nargs="?", metavar="TOKEN",
+                        help="Bearer token (may also be given with --token).")
+    parser.add_argument("--token", help="Bearer token.")
+    parser.add_argument("--url", help="Override the gateway URL.")
+    parser.add_argument("--interval", type=int, metavar="SECONDS",
+                        help=f"Report cadence in seconds (default: {DEFAULT_INTERVAL}).")
+    parser.add_argument("--config", help="Explicit config file path to write.")
+    parser.add_argument("--no-start", action="store_true",
+                        help="Write the config but do not start the service.")
+    args = parser.parse_args(argv)
+
+    token = args.token or args.token_pos
+    if not token:
+        parser.error("a token is required (positional TOKEN or --token)")
+
+    target = resolve_writable_config(args.config)
+    values = {"TELEMETRY_TOKEN": token}
+    if args.url:
+        values["TELEMETRY_URL"] = args.url
+    if args.interval:
+        values["REPORT_INTERVAL"] = str(args.interval)
+
+    write_config_values(target, values)
+    log(f"Saved token to {target}")
+
+    if args.no_start:
+        log("Config written. Start it with: brew services start ip-reporter")
+        return 0
+
+    if not shutil.which("brew"):
+        log("Homebrew not found. Config written; start the service however you "
+            "manage it (e.g. ./install.sh, or run: ip-reporter).")
+        return 0
+
+    log("Starting service: brew services restart ip-reporter")
+    rc = subprocess.call(["brew", "services", "restart", "ip-reporter"])
+    if rc == 0:
+        log("Service running. Logs: $(brew --prefix)/var/log/ip-reporter.log")
+    return rc
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+
+    # Subcommand: `ip-reporter install [TOKEN] [--token ...]`
+    if argv and argv[0] == "install":
+        return do_install(argv[1:])
+
     parser = argparse.ArgumentParser(
         description="Report this machine's WAN/LAN IP to the telemetry gateway.",
+        epilog="Subcommand: `ip-reporter install --token <TOKEN>` saves the token "
+               "and starts the hourly service (cloudflared-style).",
     )
     parser.add_argument("--token", help="Bearer token (overrides env/config).")
     parser.add_argument("--url", help=f"Gateway URL (default: {DEFAULT_TELEMETRY_URL}).")
