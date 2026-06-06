@@ -51,7 +51,7 @@ import time
 import urllib.error
 import urllib.request
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 DEFAULT_TELEMETRY_URL = "https://telemetry.lgnat.com/api/telemetry"
 DEFAULT_INTERVAL = 3600  # seconds (1 hour)
 HTTP_TIMEOUT = 10  # seconds
