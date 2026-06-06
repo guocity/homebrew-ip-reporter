@@ -1,7 +1,7 @@
 class IpReporter < Formula
   desc "Report a machine's WAN and LAN IP to the telemetry gateway on a schedule"
   homepage "https://github.com/guocity/homebrew-ip-reporter"
-  url "https://github.com/guocity/homebrew-ip-reporter.git", tag: "v1.0.0", revision: "__REVISION__"
+  url "https://github.com/guocity/homebrew-ip-reporter.git", tag: "v1.0.0", revision: "21f729abdd7c4709c9398c8820ca274eb6585f2f"
   license "MIT"
   head "https://github.com/guocity/homebrew-ip-reporter.git", branch: "main"
 
