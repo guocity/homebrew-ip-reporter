@@ -1,11 +1,17 @@
 # homebrew-ip-reporter
 
-A Homebrew tap for **ip-reporter** — a tiny, dependency-free Python agent that
-reports a machine's **WAN IP** and **LAN IP** to a telemetry gateway on a
-schedule (hourly by default). Each host identifies itself by its `hostname`.
+A Homebrew tap for **ip-reporter** — a tiny native **Rust** agent that reports a
+machine's **WAN IP** and **LAN IP** to the **`ip_info`** gateway on a schedule
+(hourly by default). Each host identifies itself by its `hostname`.
 
-The agent uses only the Python 3 standard library and contains no secrets — the
-auth token is supplied at runtime (CLI flag or config file).
+The agent is a small (~1 MB) self-contained binary with a near-zero idle
+footprint: it's single-threaded, has no async runtime, and sleeps between
+reports. TLS is bundled (rustls), so there's no OpenSSL or Python dependency. It
+contains no secrets — the auth token is supplied at runtime (CLI flag or config
+file).
+
+> Built from a single `src/main.rs` (deps: `ureq` + `gethostname`). A Python
+> reference implementation, `ip_reporter.py`, remains in the repo for reference.
 
 ## Install
 
@@ -14,14 +20,20 @@ brew tap guocity/ip-reporter
 brew install ip-reporter
 ```
 
+Or build from source (requires the Rust toolchain):
+
+```bash
+cargo build --release   # binary at target/release/ip-reporter
+```
+
 ## Run as a background service (hourly)
 
-Mint a token on your telemetry server host (bound to this machine's hostname),
+Mint a token on your `ip_info` server host (bound to this machine's hostname),
 then install it in one step — the same shape as `cloudflared service install <TOKEN>`:
 
 ```bash
 # on the server host:
-node server/manage-tokens.js generate "$(hostname)" telemetry
+node server/manage-tokens.js generate "$(hostname)" ip_info
 
 # on this machine — saves the token and starts the hourly service:
 ip-reporter install --token <TOKEN>

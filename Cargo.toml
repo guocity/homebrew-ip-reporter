@@ -1,0 +1,25 @@
+[package]
+name = "ip-reporter"
+version = "2.0.0"
+edition = "2021"
+description = "Report a machine's WAN and LAN IP to the telemetry gateway on a schedule"
+license = "MIT"
+repository = "https://github.com/guocity/homebrew-ip-reporter"
+
+[[bin]]
+name = "ip-reporter"
+path = "src/main.rs"
+
+[dependencies]
+# Blocking HTTP client with bundled rustls TLS (no OpenSSL / system cert deps).
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# Tiny, dependency-free hostname lookup.
+gethostname = "0.5"
+
+# Size- and resource-tuned release build: small binary, low footprint.
+[profile.release]
+opt-level = "z"     # optimize for size
+lto = true          # link-time optimization across crates
+codegen-units = 1   # better optimization at the cost of compile parallelism
+panic = "abort"     # no unwinding machinery
+strip = true        # strip symbols

@@ -1,21 +1,17 @@
 class IpReporter < Formula
   desc "Report a machine's WAN and LAN IP to the telemetry gateway on a schedule"
   homepage "https://github.com/guocity/homebrew-ip-reporter"
-  url "https://github.com/guocity/homebrew-ip-reporter.git", tag: "v1.0.1", revision: "7d348692746a3a21109bf7632dc0efdaca96e495"
+  # NOTE: after tagging v2.0.0, pin the revision in a follow-up commit (matching
+  # the v1.0.x pattern) so installs are reproducible.
+  url "https://github.com/guocity/homebrew-ip-reporter.git", tag: "v2.0.0"
   license "MIT"
   head "https://github.com/guocity/homebrew-ip-reporter.git", branch: "main"
 
-  depends_on "python@3.13"
+  depends_on "rust" => :build
 
   def install
-    libexec.install "ip_reporter.py"
-
-    # Thin wrapper so `ip-reporter` runs the script with the formula's Python.
-    (bin/"ip-reporter").write <<~SH
-      #!/bin/bash
-      exec "#{Formula["python@3.13"].opt_bin}/python3.13" "#{libexec}/ip_reporter.py" "$@"
-    SH
-    chmod 0755, bin/"ip-reporter"
+    # Build the native Rust binary and install it to bin/.
+    system "cargo", "install", *std_cargo_args
 
     # Seed a config file under etc (Homebrew preserves your edits across upgrades).
     (etc/"ip-reporter").install "config.example.env" => "config.env"
